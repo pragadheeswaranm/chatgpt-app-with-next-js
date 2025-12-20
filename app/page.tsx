@@ -1,12 +1,14 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import {
   useWidgetProps,
+  useWidgetState,
   useMaxHeight,
   useDisplayMode,
   useRequestDisplayMode,
   useIsChatGptApp,
+  useOpenAIGlobal,
 } from "./hooks";
 import { getVariantImageUrl } from "@/lib/utils/image-utils";
 
@@ -43,17 +45,39 @@ interface ToolOutput extends Record<string, unknown> {
 }
 
 export default function Home() {
-  // Read tool output from window.openai.toolOutput (official OpenAI pattern)
-  const toolOutput = useWidgetProps<ToolOutput>();
-  const maxHeight = useMaxHeight() ?? undefined;
-  const displayMode = useDisplayMode();
-  const requestDisplayMode = useRequestDisplayMode();
+  // ========================================================================
+  // window.openai API Usage - Following Official OpenAI Pattern
+  // Reference: https://developers.openai.com/apps-sdk/reference
+  // ========================================================================
+  
+  // State & Data APIs
+  const toolOutput = useWidgetProps<ToolOutput>(); // window.openai.toolOutput
+  const toolInput = useOpenAIGlobal("toolInput"); // window.openai.toolInput (arguments supplied when tool was invoked)
+  const toolResponseMetadata = useOpenAIGlobal("toolResponseMetadata"); // window.openai.toolResponseMetadata (_meta payload)
+  
+  // Widget State - Persists across widget lifecycles (minimize/restore)
+  const [widgetState, setWidgetState] = useWidgetState<{ selectedCardId: number | null }>(() => ({
+    selectedCardId: null,
+  }));
+  
+  // Context Signals - Environment information
+  const maxHeight = useMaxHeight() ?? undefined; // window.openai.maxHeight
+  const displayMode = useDisplayMode(); // window.openai.displayMode
+  const theme = useOpenAIGlobal("theme"); // window.openai.theme
+  const locale = useOpenAIGlobal("locale"); // window.openai.locale
+  const userAgent = useOpenAIGlobal("userAgent"); // window.openai.userAgent
+  
+  // Widget Runtime APIs
+  const requestDisplayMode = useRequestDisplayMode(); // window.openai.requestDisplayMode
   const isChatGptApp = useIsChatGptApp();
 
-  const [selectedCard, setSelectedCard] = useState<CatalogItem | null>(null);
+  // Local component state (not persisted)
   const [localCatalog, setLocalCatalog] = useState<CatalogItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [localError, setLocalError] = useState<string | null>(null);
+  
+  // Ref for tracking height changes
+  const containerRef = useRef<HTMLDivElement>(null);
 
   // Extract data from toolOutput (official pattern: window.openai.toolOutput)
   const catalogFromTool = toolOutput?.catalog || [];
@@ -64,17 +88,36 @@ export default function Home() {
   const catalog = catalogFromTool.length > 0 ? catalogFromTool : localCatalog;
   const serviceName = serviceNameFromTool;
   const error = errorFromTool || localError;
+  
+  // Find selected card from widgetState (persisted across renders)
+  const selectedCard = widgetState?.selectedCardId
+    ? catalog.find((item) => item.id === widgetState.selectedCardId) || null
+    : null;
 
-  // Debug logging (development only)
+  // Debug logging (development only) - Shows all window.openai APIs
   useEffect(() => {
     if (typeof window !== 'undefined' && process.env.NODE_ENV === 'development') {
       console.log('[Widget Debug] window.openai.toolOutput:', toolOutput);
+      console.log('[Widget Debug] window.openai.toolInput:', toolInput);
+      console.log('[Widget Debug] window.openai.toolResponseMetadata:', toolResponseMetadata);
+      console.log('[Widget Debug] window.openai.widgetState:', widgetState);
+      console.log('[Widget Debug] window.openai.theme:', theme);
+      console.log('[Widget Debug] window.openai.locale:', locale);
+      console.log('[Widget Debug] window.openai.displayMode:', displayMode);
       console.log('[Widget Debug] catalog from tool:', catalogFromTool);
       console.log('[Widget Debug] catalog length:', catalog?.length);
       console.log('[Widget Debug] serviceName:', serviceName);
       console.log('[Widget Debug] isChatGptApp:', isChatGptApp);
     }
-  }, [toolOutput, catalogFromTool, catalog, serviceName, isChatGptApp]);
+  }, [toolOutput, toolInput, toolResponseMetadata, widgetState, theme, locale, displayMode, catalogFromTool, catalog, serviceName, isChatGptApp]);
+
+  // Notify ChatGPT of dynamic height changes (official pattern)
+  useEffect(() => {
+    if (typeof window !== 'undefined' && window.openai?.notifyIntrinsicHeight && containerRef.current) {
+      const height = containerRef.current.scrollHeight;
+      window.openai.notifyIntrinsicHeight({ height });
+    }
+  }, [catalog.length, selectedCard, displayMode]);
 
   // Fallback: Fetch catalog data locally if not in ChatGPT or toolOutput is empty
   const fetchCatalogData = useCallback(async () => {
@@ -128,16 +171,33 @@ export default function Home() {
     return () => clearTimeout(timeoutId);
   }, [isChatGptApp, catalogFromTool.length, loading, localCatalog.length, localError, fetchCatalogData]);
 
+  // Handle card click - Persist selection in widgetState (official pattern)
   const handleCardClick = (item: CatalogItem) => {
-    setSelectedCard(item);
+    setWidgetState({ selectedCardId: item.id });
+    // Notify height change after modal opens
+    setTimeout(() => {
+      if (typeof window !== 'undefined' && window.openai?.notifyIntrinsicHeight && containerRef.current) {
+        const height = containerRef.current.scrollHeight;
+        window.openai.notifyIntrinsicHeight({ height });
+      }
+    }, 100);
   };
 
+  // Handle close - Clear selection from widgetState (official pattern)
   const handleCloseDetails = () => {
-    setSelectedCard(null);
+    setWidgetState({ selectedCardId: null });
+    // Notify height change after modal closes
+    setTimeout(() => {
+      if (typeof window !== 'undefined' && window.openai?.notifyIntrinsicHeight && containerRef.current) {
+        const height = containerRef.current.scrollHeight;
+        window.openai.notifyIntrinsicHeight({ height });
+      }
+    }, 100);
   };
 
   return (
     <div
+      ref={containerRef}
       className="font-sans p-4 sm:p-8 bg-slate-950 min-h-screen text-white"
       style={{
         maxHeight,

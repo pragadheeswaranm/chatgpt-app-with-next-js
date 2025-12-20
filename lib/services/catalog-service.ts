@@ -36,7 +36,7 @@ export class CatalogService {
 
   constructor() {
     this.apiUrl = "https://uat.ledgersapi.com/catalog/indiafilings-catalog/api";
-    this.apiKey = process.env.CATALOG_API_KEY || 'p4xI6QzOPI4EyFg38qtcJ1nImIFru7zW3LcrSIOh';
+    this.apiKey = 'p4xI6QzOPI4EyFg38qtcJ1nImIFru7zW3LcrSIOh';
   }
 
   /**

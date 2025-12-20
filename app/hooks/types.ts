@@ -34,6 +34,7 @@ type API = {
 
   // Layout controls
   requestDisplayMode: RequestDisplayMode;
+  notifyIntrinsicHeight: (args: { height: number }) => void;
 };
 
 export type UnknownObject = Record<string, unknown>;
