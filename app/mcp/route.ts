@@ -1,6 +1,12 @@
+// ============================================================================
+// MCP Server following official OpenAI Apps SDK pattern
+// Reference: https://developers.openai.com/apps-sdk/build/mcp-server
+// ============================================================================
+
 import { baseURL } from "@/baseUrl";
 import { createMcpHandler } from "mcp-handler";
 import { z } from "zod";
+import { CatalogService } from "@/lib/services/catalog-service";
 
 const getAppsSdkCompatibleHtml = async (baseUrl: string, path: string) => {
   const result = await fetch(`${baseUrl}${path}`);
@@ -29,27 +35,33 @@ function widgetMeta(widget: ContentWidget) {
 }
 
 const handler = createMcpHandler(async (server) => {
-  const html = await getAppsSdkCompatibleHtml(baseURL, "/");
+  const catalogService = new CatalogService();
 
-  const contentWidget: ContentWidget = {
-    id: "show_content",
-    title: "Show Content",
-    templateUri: "ui://widget/content-template.html",
-    invoking: "Loading content...",
-    invoked: "Content loaded",
-    html: html,
-    description: "Displays the homepage content",
+  // ========================================================================
+  // Pricing Catalog Widget - Following official OpenAI MCP pattern
+  // ========================================================================
+  const pricingHtml = await getAppsSdkCompatibleHtml(baseURL, "/");
+  const pricingWidget: ContentWidget = {
+    id: "show_pricing",
+    title: "Show Pricing Catalog",
+    templateUri: "ui://widget/pricing-template.html",
+    invoking: "Loading pricing catalog...",
+    invoked: "Pricing catalog loaded",
+    html: pricingHtml,
+    description: "Displays service pricing catalog with interactive cards",
     widgetDomain: "https://nextjs.org/docs",
   };
+
+  // Register resource (HTML template) - Official pattern
   server.registerResource(
-    "content-widget",
-    contentWidget.templateUri,
+    "pricing-widget",
+    pricingWidget.templateUri,
     {
-      title: contentWidget.title,
-      description: contentWidget.description,
-      mimeType: "text/html+skybridge",
+      title: pricingWidget.title,
+      description: pricingWidget.description,
+      mimeType: "text/html+skybridge", // Required: must be text/html+skybridge
       _meta: {
-        "openai/widgetDescription": contentWidget.description,
+        "openai/widgetDescription": pricingWidget.description,
         "openai/widgetPrefersBorder": true,
       },
     },
@@ -57,42 +69,108 @@ const handler = createMcpHandler(async (server) => {
       contents: [
         {
           uri: uri.href,
-          mimeType: "text/html+skybridge",
-          text: `<html>${contentWidget.html}</html>`,
+          mimeType: "text/html+skybridge", // Required: must be text/html+skybridge
+          text: `<html>${pricingWidget.html}</html>`,
           _meta: {
-            "openai/widgetDescription": contentWidget.description,
+            "openai/widgetDescription": pricingWidget.description,
             "openai/widgetPrefersBorder": true,
-            "openai/widgetDomain": contentWidget.widgetDomain,
+            "openai/widgetDomain": pricingWidget.widgetDomain,
           },
         },
       ],
     })
   );
 
+  // Register tool - Official pattern
+  // The tool returns structuredContent which becomes available in window.openai.toolOutput
   server.registerTool(
-    contentWidget.id,
+    pricingWidget.id,
     {
-      title: contentWidget.title,
+      title: pricingWidget.title,
       description:
-        "Fetch and display the homepage content with the name of the user",
+        "Use this tool when users want to register a company, incorporate a business, or view company registration services and pricing. This tool displays an interactive pricing catalog with service cards showing different company registration options (e.g., USA Company Registration, state-specific incorporations). Extract the service name from the user's query (e.g., 'USA Company Registration', 'Company Incorporation', or specific state names like 'Delaware', 'California', 'New York'). If the user mentions a location or state, include it in the serviceName parameter.",
       inputSchema: {
-        name: z.string().describe("The name of the user to display on the homepage"),
+        serviceName: z
+          .string()
+          .optional()
+          .describe(
+            "The service name to search for in the catalog. Examples: 'USA Company Registration', 'Company Incorporation', 'Delaware', 'California', 'New York', etc. Extract from user query. If user says 'register a company in USA', use 'USA Company Registration'. If user mentions a specific state, include it (e.g., 'Company Incorporation - Delaware'). If not provided, shows all company registration services."
+          ),
       },
-      _meta: widgetMeta(contentWidget),
+      _meta: widgetMeta(pricingWidget), // Links tool to resource via openai/outputTemplate
     },
-    async ({ name }) => {
+    async ({ serviceName }) => {
+      // Fetch catalog data
+      const { catalog, error } = await catalogService.fetchCatalog();
+
+      if (error) {
+        return {
+          content: [
+            {
+              type: "text",
+              text: `Error fetching catalog: ${error}. Please check the API configuration.`,
+            },
+          ],
+          structuredContent: {
+            serviceName: serviceName || null,
+            catalog: [],
+            error: error,
+          },
+          _meta: widgetMeta(pricingWidget),
+        };
+      }
+
+      // Filter by service name if provided (client-side filtering in widget)
+      const filteredCatalog = serviceName
+        ? catalog.filter((item) => {
+            const searchTerm = serviceName.toLowerCase().trim();
+            const serviceNameLower = item.service_name?.toLowerCase() || '';
+            const variantNameLower = item.variant_name?.toLowerCase() || '';
+            const categoryLower = item.category?.toLowerCase() || '';
+
+            return (
+              serviceNameLower.includes(searchTerm) ||
+              variantNameLower.includes(searchTerm) ||
+              categoryLower.includes(searchTerm)
+            );
+          })
+        : catalog;
+
+      // If no results found, provide helpful message
+      if (filteredCatalog.length === 0) {
+        return {
+          content: [
+            {
+              type: "text",
+              text: serviceName
+                ? `No services found matching "${serviceName}". Showing all available services.`
+                : "No services available in the catalog.",
+            },
+          ],
+          structuredContent: {
+            serviceName: serviceName || null,
+            catalog: catalog, // Return all items if filter yields no results
+            count: catalog.length,
+            message: serviceName ? "No matching services found, showing all" : "No services available",
+          },
+          _meta: widgetMeta(pricingWidget),
+        };
+      }
+
+      // Return structuredContent - this becomes window.openai.toolOutput in the widget
       return {
         content: [
           {
             type: "text",
-            text: name,
+            text: `Found ${filteredCatalog.length} service(s)${serviceName ? ` matching "${serviceName}"` : ""}.`,
           },
         ],
         structuredContent: {
-          name: name,
-          timestamp: new Date().toISOString(),
+          serviceName: serviceName || null,
+          catalog: filteredCatalog,
+          count: filteredCatalog.length,
         },
-        _meta: widgetMeta(contentWidget),
+        _meta: widgetMeta(pricingWidget),
       };
     }
   );
