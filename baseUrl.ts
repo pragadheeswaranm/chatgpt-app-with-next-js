@@ -6,6 +6,7 @@ function getBaseURL(): string {
   
   // For Vercel deployments, try multiple environment variables
   // VERCEL_URL is always available during build and runtime on Vercel
+  // Priority: Production URL > Branch URL > VERCEL_URL > NEXT_PUBLIC_VERCEL_URL
   const vercelUrl = 
     process.env.VERCEL_PROJECT_PRODUCTION_URL ||
     process.env.VERCEL_BRANCH_URL ||
@@ -13,15 +14,25 @@ function getBaseURL(): string {
     process.env.NEXT_PUBLIC_VERCEL_URL;
   
   if (vercelUrl) {
-    // Ensure it starts with https://
-    return vercelUrl.startsWith("https://") 
-      ? vercelUrl 
-      : `https://${vercelUrl}`;
+    // Remove any trailing slashes and ensure it starts with https://
+    const cleanUrl = vercelUrl.replace(/\/$/, "");
+    return cleanUrl.startsWith("https://") 
+      ? cleanUrl 
+      : `https://${cleanUrl}`;
   }
   
-  // Fallback: return empty string - relative paths will work
-  // This should rarely happen on Vercel as VERCEL_URL is always set
-  console.warn("No Vercel URL found. Using relative paths.");
+  // On Vercel, one of these should always be available
+  // If not, we'll use empty string and Next.js will use relative paths
+  // This is a fallback that should rarely be needed
+  if (typeof window === "undefined") {
+    // Server-side: log warning
+    console.warn(
+      "[baseUrl] No Vercel URL found in environment variables. " +
+      "Available vars:",
+      Object.keys(process.env).filter(k => k.includes("VERCEL"))
+    );
+  }
+  
   return "";
 }
 

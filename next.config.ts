@@ -1,9 +1,18 @@
 import type { NextConfig } from "next";
+import { baseURL } from "./baseUrl";
 
 const nextConfig: NextConfig = {
-  // Don't use assetPrefix - let Next.js use relative paths
-  // The <base> tag in layout.tsx will handle the base URL for iframe embedding
-  // This prevents chunk loading errors when the app is embedded in ChatGPT's iframe
+  // For iframe embedding in ChatGPT, we need assetPrefix to ensure chunks load from correct origin
+  // Only set it if baseURL is valid (not empty string)
+  ...(baseURL && baseURL !== "" && { assetPrefix: baseURL }),
+  
+  // Ensure proper chunk generation
+  experimental: {
+    // Optimize for production builds
+  },
+  
+  // Ensure static assets are properly generated
+  output: undefined, // Let Vercel handle this automatically
 };
 
 export default nextConfig;
